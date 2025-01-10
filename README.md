@@ -1,13 +1,16 @@
-# visual_metrics_tracking
+Feature based user tracking
 
-# KLT Tracker for User Following
+The following implemention uses Scale-Invariant Feature Transform detector for accurate user tracking
 
-Implementing a **Kanade-Lucas-Tomasi (KLT) Tracker** to track a specific user in real-time, enabling a robot to follow them based on their position and movement.
+SIFT is a feature detection algorithm used in computer vision to identify and describe distinctive points in images (keypoints).
 
-## Features
-- Tracks a user using the KLT Tracker algorithm.
+It is scale and rotation invariant, meaning it can detect the same features even if the image is resized or rotated.
+Steps in SIFT:
 
-## Requirements
-- Python 3.x
-- OpenCV
-  
+Scale-Space Extrema Detection: Identify potential keypoints using a Difference of Gaussian (DoG) method across multiple scales.
+
+Keypoint Localization: Refine these points to filter out noise.
+
+Orientation Assignment: Assign orientations to keypoints to make them rotation-invariant.
+
+Keypoint Descriptor: Generate a unique descriptor vector for each keypoint.
