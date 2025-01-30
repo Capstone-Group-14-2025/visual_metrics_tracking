@@ -1,0 +1,144 @@
+import cv2
+import numpy as np
+
+class FeatureBasedTracker:
+    def __init__(self):
+        # Create SIFT and FLANN
+        self.sift = cv2.SIFT_create()
+        FLANN_INDEX_KDTREE = 1
+        index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params = dict(checks=50)
+        self.flann = cv2.FlannBasedMatcher(index_params, search_params)
+
+        # Internals
+        self.object_descriptors = None
+        self.background_descriptors = None
+        self.prev_bbox = None
+        self.initialized = False
+
+    def initialize_tracking(self, frame, bbox):
+        """
+        Initialize the SIFT-based tracker with an ROI specified by bbox.
+        bbox = (x, y, w, h)
+        """
+        self.prev_bbox = bbox
+
+        x, y, w, h = bbox
+        # Detect keypoints in entire frame
+        keypoints, descriptors = self.sift.detectAndCompute(frame, None)
+        if descriptors is None:
+            return
+
+        object_keypoints = []
+        object_descriptors = []
+        background_keypoints = []
+        background_descriptors = []
+
+        # Separate keypoints/descriptors into object and background
+        for kp, desc in zip(keypoints, descriptors):
+            if (x <= kp.pt[0] <= x + w) and (y <= kp.pt[1] <= y + h):
+                object_keypoints.append(kp)
+                object_descriptors.append(desc)
+            else:
+                background_keypoints.append(kp)
+                background_descriptors.append(desc)
+
+        if len(object_descriptors) > 0:
+            self.object_descriptors = np.array(object_descriptors, dtype=np.float32)
+        else:
+            self.object_descriptors = None
+        if len(background_descriptors) > 0:
+            self.background_descriptors = np.array(background_descriptors, dtype=np.float32)
+        else:
+            self.background_descriptors = None
+
+        self.initialized = True
+
+    def track_object(self, frame):
+        """
+        Uses SIFT matching + FLANN to update the bounding box.
+        Returns the new_bbox (x, y, w, h) or None if tracking fails.
+        """
+        if (not self.initialized or
+            self.object_descriptors is None or
+            self.background_descriptors is None):
+            return None
+
+        keypoints, descriptors = self.sift.detectAndCompute(frame, None)
+        if descriptors is None or len(keypoints) == 0:
+            return None
+
+        # KNN match to object and background
+        try:
+            object_matches = self.flann.knnMatch(descriptors, self.object_descriptors, k=2)
+            background_matches = self.flann.knnMatch(descriptors, self.background_descriptors, k=2)
+        except:
+            return None
+
+        object_points = []
+        for i, kp in enumerate(keypoints):
+            if i < len(object_matches) and len(object_matches[i]) == 2:
+                # Best match distance for object
+                d_o1 = object_matches[i][0].distance
+                # For background
+                if i < len(background_matches) and len(background_matches[i]) > 0:
+                    d_b1 = background_matches[i][0].distance
+                else:
+                    d_b1 = float('inf')
+
+                if d_b1 == 0:  # avoid division by zero
+                    continue
+
+                ratio = d_o1 / d_b1
+                if ratio < 0.5:  # accept match
+                    object_points.append(kp.pt)
+
+        if len(object_points) == 0:
+            return None
+
+        # Use min/max to define bounding box
+        points = np.array(object_points)
+        x_min, y_min = np.min(points, axis=0)
+        x_max, y_max = np.max(points, axis=0)
+
+        new_bbox = (int(x_min), int(y_min), int(x_max - x_min), int(y_max - y_min))
+        self.prev_bbox = new_bbox
+        return new_bbox
+
+# Example usage:
+if __name__ == "__main__":
+    cap = cv2.VideoCapture(0)
+    tracker = FeatureBasedTracker()
+    initialized = False
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if not initialized:
+            # Select ROI
+            bbox = cv2.selectROI("Select ROI", frame, fromCenter=False, showCrosshair=True)
+            cv2.destroyWindow("Select ROI")
+            tracker.initialize_tracking(frame, bbox)
+            initialized = True
+        else:
+            # Track
+            bbox = tracker.track_object(frame)
+            if bbox is not None:
+                x, y, w, h = bbox
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            else:
+                cv2.putText(frame, "Tracking lost!", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+        cv2.imshow("Tracking", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('r'):
+            # Reset ROI
+            initialized = False
+
+    cap.release()
+    cv2.destroyAllWindows()
